@@ -1,0 +1,898 @@
+---
+title: 'Practical Homework 2: Support Vector Machines'
+output:
+  html_document:
+    df_print: paged
+---
+
+
+## Load libraries and data
+```{r}
+library(tidyverse)
+library(e1071)
+library(ISLR2)
+library(ROCR)
+library(ggplot2)
+
+#Load data - File downloaded from https://github.com/mendible/5322/blob/eba695e0daaef598d7b2af8cf9b6722a3457b865/Homework%202/nhis_2022.csv
+df <- read.csv('nhis_2022.csv')
+
+#Display data to evaluate df contents
+summary(df)
+```
+
+## Data Check
+```{r}
+# Evaluate if there are NAs in df
+cat("NAs per Variable:\n")
+colSums(is.na(df))
+
+# Evaluate variable's class type
+cat("\nVariable Class Type:\n")
+sapply(df, class)
+
+
+```
+
+
+## Data Cleaning and Preprocessing
+```{r}
+# There are no NAs in df, but running drop_na() anyways. 
+df_adults <-  df %>% 
+  drop_na() %>%
+  # Removing Survey Information variables
+  select(-c(YEAR, SERIAL, STRATA, PSU, NHISHID, NHISPID, HHX, PERNUM, ASTATFLG, CSTATFLG, ALCANYNO)) %>% 
+  # Filtering for Adults (18+) and removing values >=85. 
+  # Age variable codes individuals as 85 if they are 85 years old or older. 
+  filter(AGE >= 18 & AGE<= 84) %>%
+  filter(REGION==3) %>%
+  mutate(HINOTCOVE = ifelse(HINOTCOVE %in% c(7, 8), 9, HINOTCOVE)) %>% 
+  mutate(CANCEREV = ifelse(CANCEREV %in% c(7, 8), 9, CANCEREV)) %>% 
+  mutate(CHEARTDIEV = ifelse(CHEARTDIEV %in% c(7, 8), 9, CHEARTDIEV)) %>% 
+  mutate(DIABETICEV = ifelse(DIABETICEV %in% c(7, 8), 9, DIABETICEV)) %>% 
+  mutate(HEARTATTEV = ifelse(HEARTATTEV %in% c(7, 8), 9, HEARTATTEV)) %>% 
+  mutate(STROKEV = ifelse(STROKEV %in% c(7, 8), 9, STROKEV))
+
+#Display data to evaluate df contents
+cat("\nSummary of df_adults:\n")
+summary(df_adults)
+
+# Evaluate variable's class type
+cat("\nVariable Class Type:\n")
+sapply(df_adults, class)
+
+# Display number of adults with mejor health conditions. 
+cat("\nEver told had cancer:")
+sum(df_adults$CANCEREV==2)
+cat("\nEver told had coronary heart disease:")
+sum(df_adults$CHEARTDIEV==2)
+cat("\nEver told had diabetes:")
+sum(df_adults$DIABETICEV==2)
+cat("\nEver told had heart attack:")
+sum(df_adults$HEARTATTEV==2)
+cat("\nEver told had a stroke:")
+sum(df_adults$STROKEV==2)
+
+# Kids (0-17) did not indicate any major health condition except 29 cases of diabetes. 
+
+
+```
+
+
+#### After evaluating the variables, next steps will be to remove invalid answers and align some labels:
+- SEX (factor): Remove 7, 8, 9 values. These are unknown values
+- EDUC (factor): Re-code 997 and 998, to 999, these are all Unknown values
+- HOURSWRK (continuous): Remove values above 95.
+- POVERTY (factor): Remove values 38, 98. 38 could mean 2.00 and over (no other detail) and 98 is Undefinable.
+- HEIGHT (continuous): Remove 95, 97, 98, 99. These are unknown values. 96 code is used for exceptionally short or tall, it does not represent accurate height, and needs to be removed. 
+- WEIGHT (continuous): Remove 997, 998, 999 values. These are unknown values.
+- BMICALC (continuous): Remove 996 values. These are Not calculable values. 
+- HINOTCOVE (factor): Convert 7 and 8, to 9, these are all Unknown values. 
+- CANCEREV (factor): Convert 7 and 8, to 9, these are all Unknown values. 
+- CHEARTDIEV (factor): Convert 7 and 8, to 9, these are all Unknown values.
+- DIABETICEV (factor): Convert 7 and 8, to 9, these are all Unknown values.
+- HEARTATTEV (factor): Convert 7 and 8, to 9, these are all Unknown values.
+- STROKEV (factor): Convert 7 and 8, to 9, these are all Unknown values.
+- ALCDAYSYR (continuous): Remove 997, 998, 999 values. These are unknown values.
+- CIGDAYMO (continuous): Remove 97, 98, 99 values. These are unknown values.
+- MOD10DMIN (continuous): Remove 997, 998, 999 values. These are unknown values. 996, might be modified to reflect it is an extreme value. 
+- VIG10DMIN (continuous): Remove 997, 998, 999 values. These are unknown values. 996, might be modified to reflect it is an extreme value.
+- FRUTNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values. 
+- VEGENO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- JUICEMNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- SALADSNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values..
+- BEANNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- SALSAMNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- TOMSAUCEMNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- SODAPNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- FRIESPNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- SPORDRMNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values
+- FRTDRINKMNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- COFETEAMNO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- POTATONO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- PIZZANO (continuous): Remove 996, 997, 998, 999 values. These are unknown values.
+- HRSLEEP (continuous): Convert 25, to 0 as this is an indicator of less than 1 hour of sleep. Remove 97, 98, 99. These are unknown values.
+- CVDSHT (factor):  Remove 7, 8, 9. These are unknown values.
+
+
+```{r}
+df_clean_all <-  df_adults %>% 
+  filter(SEX <= 2) %>%
+  mutate(EDUC = ifelse(EDUC %in% c(997, 998), 999, EDUC)) %>% 
+  filter(HOURSWRK <= 95) %>%
+  filter(HEIGHT <= 94) %>% 
+  filter(WEIGHT < 997) %>% 
+  filter(BMICALC < 996) %>%
+  filter(POVERTY < 38) %>%
+  filter(ALCDAYSYR < 997) %>%
+  filter(CIGDAYMO < 97) %>%
+  filter(MOD10DMIN < 997) %>%
+  filter(VIG10DMIN < 997) %>%
+  # Food variables contain lots of Unknown responses. It might be best to remove them ONLY when using these variables. 
+  filter(FRUTNO < 996) %>%
+  filter(VEGENO < 996) %>%
+  filter(JUICEMNO < 996) %>%
+  filter(SALADSNO < 996) %>%
+  filter(BEANNO < 996) %>%
+  filter(SALSAMNO < 996) %>%
+  filter(TOMSAUCEMNO < 996) %>%
+  filter(SODAPNO < 996) %>%
+  filter(FRIESPNO < 996) %>%
+  filter(SPORDRMNO < 996) %>%
+  filter(FRTDRINKMNO < 996) %>%
+  filter(COFETEAMNO < 996) %>%
+  filter(POTATONO < 996) %>%
+  filter(PIZZANO < 995) %>%
+  mutate(HRSLEEP = ifelse(HRSLEEP %in% c(25), 0, HRSLEEP)) %>%
+  filter(HRSLEEP < 26) %>%
+  filter(CVDSHT <= 2)
+
+
+cat("Number of rows after filtering: ", nrow(df_clean_all), "\n\n")
+
+summary(df_clean_all)
+```
+#### If I apply all the filtering strictly, we will lose a lot of data. Instead we will only clean for the variables used for the svm model. For my model I wanted to evaluate the variables using three different categories: 1) demographics, 2) physical activity and lifestyle, 3) eating habits. 
+
+```{r}
+# Demographics - who they are and where they live
+# SEX, EDUC, HOURSWRK, POVERTY, HEIGHT, WEIGHT, REGION, BMICALC
+df_dem <-  df_adults %>% 
+  mutate(EDUC = ifelse(EDUC %in% c(997, 998), 999, EDUC)) %>% 
+  filter(
+    SEX <= 2,
+    HOURSWRK <= 95,
+    HEIGHT <= 94,
+    WEIGHT < 997,
+    BMICALC < 996,
+    POVERTY < 38
+    ) %>%
+  mutate(
+    SEX = factor(SEX),
+    EDUC = factor(EDUC),
+    POVERTY = factor(POVERTY),
+    HINOTCOVE = factor(HINOTCOVE),
+    REGION = factor(REGION),
+    CANCEREV = factor(CANCEREV),
+    CHEARTDIEV = factor(CHEARTDIEV),
+    DIABETICEV = factor(DIABETICEV),
+    HEARTATTEV = factor(HEARTATTEV),
+    STROKEV = factor(STROKEV),
+    CVDSHT = factor(CVDSHT)
+  )
+
+# Physical Activity and Lifestyle - daily activity
+# HRSLEEP (sleep hours), MOD10DMIN (moderate activity), VIG10DMIN (vigorous activity), HOURSWRK (working hours), ALCDAYSYR (alcohol drinking days per year), CIGDAYMO (cigarettes smoked per month)
+df_life <-  df_adults %>% 
+  mutate(HRSLEEP = ifelse(HRSLEEP %in% c(25), 0, HRSLEEP)) %>%
+  filter(HOURSWRK <= 95,
+         ALCDAYSYR < 997,
+         CIGDAYMO < 97,
+         MOD10DMIN < 997,
+         VIG10DMIN < 997,
+         HRSLEEP < 26,
+         CVDSHT <= 2
+         ) %>%
+  mutate(
+    SEX = factor(SEX),
+    EDUC = factor(EDUC),
+    POVERTY = factor(POVERTY),
+    HINOTCOVE = factor(HINOTCOVE),
+    REGION = factor(REGION),
+    CANCEREV = factor(CANCEREV),
+    CHEARTDIEV = factor(CHEARTDIEV),
+    DIABETICEV = factor(DIABETICEV),
+    HEARTATTEV = factor(HEARTATTEV),
+    STROKEV = factor(STROKEV),
+    CVDSHT = factor(CVDSHT)
+  )
+
+# Eating habits
+# FRUTNO (fruit intake), VEGENO (vegetable intake), JUICEMNO (juice intake), SALADSNO (salads), BEANNO (beans), SALSAMNO (salsa), TOMSOUCEMNO (tomato sauce), SODAPNO (soda), FRIESPNO (fries), SPORDRMNO (energy drinks), FRTDRINKMNO (fruit flavored), COFETEAMNO (coffee/tea), POTATONO (non-fried potatoes), PIZZANO (pizza)
+df_food <-  df_adults %>% 
+  filter(FRUTNO < 996,
+         VEGENO < 996,
+         JUICEMNO < 996,
+         SALADSNO < 996,
+         BEANNO < 996,
+         SALSAMNO < 996,
+         TOMSAUCEMNO < 996,
+         SODAPNO < 996,
+         FRIESPNO < 996,
+         SPORDRMNO < 996,
+         FRTDRINKMNO < 996,
+         COFETEAMNO < 996,
+         POTATONO < 996,
+         PIZZANO < 995
+         ) %>%
+    mutate(
+    SEX = factor(SEX),
+    EDUC = factor(EDUC),
+    POVERTY = factor(POVERTY),
+    HINOTCOVE = factor(HINOTCOVE),
+    REGION = factor(REGION),
+    CANCEREV = factor(CANCEREV),
+    CHEARTDIEV = factor(CHEARTDIEV),
+    DIABETICEV = factor(DIABETICEV),
+    HEARTATTEV = factor(HEARTATTEV),
+    STROKEV = factor(STROKEV),
+    CVDSHT = factor(CVDSHT)
+  )
+
+```
+```{r}
+df_dem %>%
+  group_by(REGION) %>%
+  summarize(
+    cancer_2 = sum(CANCEREV == 2),
+    cancer_1 = sum(CANCEREV == 1),
+    ratio = cancer_2 / cancer_1
+  )
+
+
+```
+```{r}
+df_dem %>%
+  group_by(REGION) %>%
+  summarize(
+    diabetes_2 = sum(DIABETICEV == 2),
+    diabetes_1 = sum(DIABETICEV == 1),
+    ratio = diabetes_2 / diabetes_1
+  )
+```
+
+#### Function Needed to generate ROC curves. 
+```{r}
+library(ROCR)
+
+rocplot <- function(pred, truth, ...) {
+  predob <- prediction(pred, truth)
+  perf <- performance(predob, "tpr", "fpr")
+  plot(perf, ...)
+}
+```
+
+
+
+
+
+#### CANCER DEMOGRAPHICS - Class weight 1=1, 2=15
+
+```{r}
+set.seed(1)
+
+df_cancer_dem <- df_dem %>%
+  select(CANCEREV, SEX, EDUC, HOURSWRK, POVERTY, HEIGHT, WEIGHT, BMICALC) %>%
+  filter(CANCEREV %in% c(1, 2)) %>%
+  droplevels()
+
+df_cancer_dem_scaled <- df_cancer_dem %>%
+  mutate(across(where(is.numeric) & !matches("CANCEREV"), scale))
+
+n <- nrow(df_cancer_dem_scaled)
+train <- sample(1:n, size = 0.7 * n)
+train_data <- df_cancer_dem_scaled[train, ]
+test_data <- df_cancer_dem_scaled[-train, ]
+sub_train_data <- train_data[sample(1:nrow(train_data), 2000), ]
+
+class_weights <- c("1" = 1, "2" = 15)
+
+cat("\n--- Linear Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, kernel = "linear", 
+    ranges = list(cost = c(0.1, 1, 10, 100)),
+    class.weights = class_weights,
+    max.iter = 10000)
+summary(tune.out)
+best_cost_linear <- tune.out$best.parameters$cost
+bestmod_linear <- svm(CANCEREV ~ ., data = train_data, kernel = "linear", cost = best_cost_linear, class.weights = class_weights, max.iter=10000,
+                      decision.values = TRUE)
+
+ypred <- predict(bestmod_linear, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal cost (Linear SVM): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_linear, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal cost (Linear SVM): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+cat("\n--- Radial Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, 
+    kernel = "radial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      gamma = c(10, 100, 1000, 10000)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_radial <- tune.out$best.parameters$cost
+best_gamma_radial <- tune.out$best.parameters$gamma
+bestmod_radial <- svm(CANCEREV ~ ., data = train_data, type = "C-classification", kernel = "radial", 
+               cost = best_cost_radial, gamma = best_gamma_radial, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_radial, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal cost and gamma (Radial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_radial, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal cost and gamma (Radial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+cat("\n--- Polynomial Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, 
+    kernel = "polynomial", 
+    ranges = list(
+      cost = c(1, 10, 100),
+      degree = c(2, 3)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_poly <- tune.out$best.parameters$cost
+best_degree_poly <- tune.out$best.parameters$degree
+bestmod_poly <- svm(CANCEREV ~ ., data = train_data, type = "C-classification", kernel = "polynomial", 
+               degree = best_degree_poly, coef0 = 1, cost = best_cost_poly, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_poly, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal degree and cost (Polynomial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_poly, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal degree and cost (Polynomial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+fitted_linear_test <- attributes(predict(bestmod_linear, test_data, decision.values = TRUE))$decision.values
+fitted_radial_test <- attributes(predict(bestmod_radial, test_data, decision.values = TRUE))$decision.values
+fitted_poly_test <- attributes(predict(bestmod_poly, test_data, decision.values = TRUE))$decision.values
+
+rocplot(-fitted_linear_test, test_data$CANCEREV, main = "Test ROC Curves")
+rocplot(-fitted_radial_test, test_data$CANCEREV, add = TRUE, col = "red")
+rocplot(-fitted_poly_test, test_data$CANCEREV, add = TRUE, col = "blue")
+legend("bottomright", legend = c("Linear", "Radial", "Polynomial"),
+       col = c("black", "red", "blue"), lwd = 2)
+```
+
+#### Lifestyle Cancer - Class Weight 1=1, 2=15
+
+```{r}
+set.seed(1)
+
+df_cancer_life <- df_life %>%
+  select(CANCEREV, HRSLEEP, MOD10DMIN, VIG10DMIN, HOURSWRK, ALCDAYSYR, CIGDAYMO) %>%
+  filter(CANCEREV %in% c(1, 2)) %>%
+  droplevels()
+
+df_cancer_life_scaled <- df_cancer_life %>%
+  mutate(across(where(is.numeric) & !matches("CANCEREV"), scale))
+
+n <- nrow(df_cancer_life_scaled)
+train <- sample(1:n, size = 0.7 * n)
+train_data <- df_cancer_life_scaled[train, ]
+test_data <- df_cancer_life_scaled[-train, ]
+sub_train_data <- train_data[sample(1:nrow(train_data), 2000), ]
+
+class_weights <- c("1" = 1, "2" = 15)
+
+cat("\n--- Linear Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, kernel = "linear", 
+    ranges = list(cost = c(0.1, 1, 10, 100)),
+    class.weights = class_weights,
+    max.iter = 10000)
+summary(tune.out)
+best_cost_linear <- tune.out$best.parameters$cost
+bestmod_linear <- svm(CANCEREV ~ ., data = train_data, kernel = "linear", cost = best_cost_linear, class.weights = class_weights, 
+                      max.iter = 10000, decision.values = TRUE)
+
+ypred <- predict(bestmod_linear, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal cost (Linear SVM): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_linear, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal cost (Linear SVM): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+cat("\n--- Radial Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, 
+    kernel = "radial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      gamma = c(10, 100, 1000, 10000)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_radial <- tune.out$best.parameters$cost
+best_gamma_radial <- tune.out$best.parameters$gamma
+bestmod_radial <- svm(CANCEREV ~ ., data = train_data, type = "C-classification", kernel = "radial", 
+               cost = best_cost_radial, gamma = best_gamma_radial, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_radial, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal cost and gamma (Radial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_radial, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal cost and gamma (Radial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+cat("\n--- Polynomial Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, 
+    kernel = "polynomial", 
+    ranges = list(
+      cost = c(1, 10, 100),
+      degree = c(2, 3)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_poly <- tune.out$best.parameters$cost
+best_degree_poly <- tune.out$best.parameters$degree
+bestmod_poly <- svm(CANCEREV ~ ., data = train_data, type = "C-classification", kernel = "polynomial", 
+               degree = best_degree_poly, coef0 = 1, cost = best_cost_poly, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_poly, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal degree and cost (Polynomial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_poly, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal degree and cost (Polynomial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+fitted_linear_test <- attributes(predict(bestmod_linear, test_data, decision.values = TRUE))$decision.values
+fitted_radial_test <- attributes(predict(bestmod_radial, test_data, decision.values = TRUE))$decision.values
+fitted_poly_test <- attributes(predict(bestmod_poly, test_data, decision.values = TRUE))$decision.values
+
+rocplot(-fitted_linear_test, test_data$CANCEREV, main = "Test ROC Curves")
+rocplot(-fitted_radial_test, test_data$CANCEREV, add = TRUE, col = "red")
+rocplot(-fitted_poly_test, test_data$CANCEREV, add = TRUE, col = "blue")
+legend("bottomright", legend = c("Linear", "Radial", "Polynomial"),
+       col = c("black", "red", "blue"), lwd = 2)
+```
+
+#### Eating Habits Cancer - Class Weight 1=1, 2=15
+
+```{r}
+set.seed(1)
+
+df_cancer_food <- df_food %>%
+  select(CANCEREV, FRUTNO, VEGENO, JUICEMNO, SALADSNO, BEANNO, SALSAMNO, 
+         TOMSAUCEMNO, SODAPNO, FRIESPNO, SPORDRMNO, FRTDRINKMNO, 
+         COFETEAMNO, POTATONO, PIZZANO) %>%
+  filter(CANCEREV %in% c(1, 2)) %>%
+  droplevels()
+
+df_cancer_food_scaled <- df_cancer_food %>%
+  mutate(across(where(is.numeric) & !matches("CANCEREV"), scale))
+
+n <- nrow(df_cancer_food_scaled)
+train <- sample(1:n, size = 0.7 * n)
+train_data <- df_cancer_food_scaled[train, ]
+test_data <- df_cancer_food_scaled[-train, ]
+sub_train_data <- train_data[sample(1:nrow(train_data), 2000), ]
+
+class_weights <- c("1" = 1, "2" = 15)
+
+cat("\n--- Linear Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, kernel = "linear", 
+    ranges = list(cost = c(0.1, 1, 10, 100)),
+    class.weights = class_weights,
+    max.iter = 100000)
+summary(tune.out)
+best_cost_linear <- tune.out$best.parameters$cost
+bestmod_linear <- svm(CANCEREV ~ ., data = train_data, kernel = "linear", cost = best_cost_linear, class.weights = class_weights, 
+                      max.iter = 100000, decision.values = TRUE)
+
+ypred <- predict(bestmod_linear, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal cost (Linear SVM): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_linear, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal cost (Linear SVM): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+cat("\n--- Radial Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, 
+    kernel = "radial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      gamma = c(10, 100, 1000, 10000)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_radial <- tune.out$best.parameters$cost
+best_gamma_radial <- tune.out$best.parameters$gamma
+bestmod_radial <- svm(CANCEREV ~ ., data = train_data, type = "C-classification", kernel = "radial", 
+               cost = best_cost_radial, gamma = best_gamma_radial, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_radial, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal cost and gamma (Radial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_radial, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal cost and gamma (Radial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+cat("\n--- Polynomial Kernel Results ---\n")
+
+tune.out <- tune(svm, CANCEREV ~ ., data = sub_train_data, 
+    kernel = "polynomial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      degree = c(2, 3)
+      ),
+    class.weights = class_weights, 
+    max.iter = 100000)
+summary(tune.out)
+best_cost_poly <- tune.out$best.parameters$cost
+best_degree_poly <- tune.out$best.parameters$degree
+bestmod_poly <- svm(CANCEREV ~ ., data = train_data, type = "C-classification", kernel = "polynomial", 
+               degree = best_degree_poly, coef0 = 1, cost = best_cost_poly, class.weights = class_weights, max.iter = 100000, 
+               decision.values = TRUE)
+
+ypred <- predict(bestmod_poly, train_data)
+train_error <- 1 - mean(ypred == train_data$CANCEREV)
+cat("Training error with optimal degree and cost (Polynomial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$CANCEREV))
+
+ypred <- predict(bestmod_poly, test_data)
+test_error <- 1 - mean(ypred == test_data$CANCEREV)
+cat("\nTest error with optimal degree and cost (Polynomial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$CANCEREV))
+
+fitted_linear_test <- attributes(predict(bestmod_linear, test_data, decision.values = TRUE))$decision.values
+fitted_radial_test <- attributes(predict(bestmod_radial, test_data, decision.values = TRUE))$decision.values
+fitted_poly_test <- attributes(predict(bestmod_poly, test_data, decision.values = TRUE))$decision.values
+
+rocplot(-fitted_linear_test, test_data$CANCEREV, main = "Test ROC Curves")
+rocplot(-fitted_radial_test, test_data$CANCEREV, add = TRUE, col = "red")
+rocplot(-fitted_poly_test, test_data$CANCEREV, add = TRUE, col = "blue")
+legend("bottomright", legend = c("Linear", "Radial", "Polynomial"),
+       col = c("black", "red", "blue"), lwd = 2)
+```
+
+
+
+
+
+#### DIABETES DEMOGRAPHICS - Class weight 1=1, 2=15
+```{r}
+
+set.seed(1)
+
+df_dia_dem <- df_dem %>%
+  select(DIABETICEV, SEX, EDUC, HOURSWRK, POVERTY, HEIGHT, WEIGHT, BMICALC) %>%
+  filter(DIABETICEV %in% c(1, 2)) %>%
+  droplevels()
+
+df_dia_dem_scaled <- df_dia_dem %>%
+  mutate(across(where(is.numeric) & !matches("DIABETICEV"), scale))
+
+n <- nrow(df_dia_dem_scaled)
+train <- sample(1:n, size = 0.7 * n)   
+train_data <- df_dia_dem_scaled[train, ]
+test_data <- df_dia_dem_scaled[-train, ]
+sub_train_data <- train_data[sample(1:nrow(train_data), 2000), ]
+
+class_weights <- c("1" = 1, "2" = 15)
+
+cat("\n--- Linear Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, kernel = "linear", 
+    ranges = list(cost = c(1, 10, 100)),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_linear <- tune.out$best.parameters$cost
+bestmod_linear <- svm(DIABETICEV ~ ., data = train_data, kernel = "linear", cost = best_cost_linear, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_linear, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal cost (Linear SVM): ", round(train_error, 4), "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_linear, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal cost (Linear SVM): ", round(test_error, 4), "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+cat("\n--- Radial Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, 
+    kernel = "radial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      gamma = c(10, 100, 1000, 10000)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_radial <- tune.out$best.parameters$cost
+best_gamma_radial <- tune.out$best.parameters$gamma
+bestmod_radial <- svm(DIABETICEV ~ ., data = train_data, type = "C-classification", kernel = "radial", 
+               cost = best_cost_radial, gamma = best_gamma_radial, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_radial, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal cost and gamma (Radial Kernel): ", round(train_error, 4), "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_radial, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal cost and gamma (Radial Kernel): ", round(test_error, 4), "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+cat("\n--- Polynomial Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, 
+    kernel = "polynomial", 
+    ranges = list(
+      cost = c(1, 10, 100),
+      degree = c(2, 3)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_poly <- tune.out$best.parameters$cost
+best_degree_poly <- tune.out$best.parameters$degree
+bestmod_poly <- svm(DIABETICEV ~ ., data = train_data, type = "C-classification", kernel = "polynomial", 
+               degree = best_degree_poly, coef0 = 1, cost = best_cost_poly, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_poly, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal degree and cost (Polynomial Kernel): ", round(train_error, 4), "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_poly, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal degree and cost (Polynomial Kernel): ", round(test_error, 4), "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+fitted_linear_test <- attributes(predict(bestmod_linear, test_data, decision.values = TRUE))$decision.values
+fitted_radial_test <- attributes(predict(bestmod_radial, test_data, decision.values = TRUE))$decision.values
+fitted_poly_test <- attributes(predict(bestmod_poly, test_data, decision.values = TRUE))$decision.values
+
+rocplot(-fitted_linear_test, test_data$DIABETICEV, main = "Test ROC Curves")
+rocplot(-fitted_radial_test, test_data$DIABETICEV, add = TRUE, col = "red")
+rocplot(-fitted_poly_test, test_data$DIABETICEV, add = TRUE, col = "blue")
+legend("bottomright", legend = c("Linear", "Radial", "Polynomial"),
+       col = c("black", "red", "blue"), lwd = 2)
+```
+
+#### LIFESTYLE DIABETES - Class Weight 1=1, 2=15
+```{r}
+set.seed(1)
+
+df_dia_life <- df_life %>%
+  select(DIABETICEV, HRSLEEP, MOD10DMIN, VIG10DMIN, HOURSWRK, ALCDAYSYR, CIGDAYMO) %>%
+  filter(DIABETICEV %in% c(1, 2)) %>%
+  droplevels()
+
+df_dia_life_scaled <- df_dia_life %>%
+  mutate(across(where(is.numeric) & !matches("DIABETICEV"), scale))
+
+n <- nrow(df_dia_life_scaled)
+train <- sample(1:n, size = 0.7 * n)
+train_data <- df_dia_life_scaled[train, ]
+test_data <- df_dia_life_scaled[-train, ]
+sub_train_data <- train_data[sample(1:nrow(train_data), 2000), ]
+
+class_weights <- c("1" = 1, "2" = 15)
+
+cat("\n--- Linear Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, kernel = "linear", 
+    ranges = list(cost = c(1, 10, 100)),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_linear <- tune.out$best.parameters$cost
+bestmod_linear <- svm(DIABETICEV ~ ., data = train_data, kernel = "linear", cost = best_cost_linear, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_linear, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal cost (Linear SVM): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_linear, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal cost (Linear SVM): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+cat("\n--- Radial Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, 
+    kernel = "radial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      gamma = c(10, 100, 1000, 10000)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_radial <- tune.out$best.parameters$cost
+best_gamma_radial <- tune.out$best.parameters$gamma
+bestmod_radial <- svm(DIABETICEV ~ ., data = train_data, type = "C-classification", kernel = "radial", 
+               cost = best_cost_radial, gamma = best_gamma_radial, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_radial, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal cost and gamma (Radial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_radial, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal cost and gamma (Radial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+cat("\n--- Polynomial Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, 
+    kernel = "polynomial", 
+    ranges = list(
+      cost = c(1, 10, 100),
+      degree = c(2, 3)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_poly <- tune.out$best.parameters$cost
+best_degree_poly <- tune.out$best.parameters$degree
+bestmod_poly <- svm(DIABETICEV ~ ., data = train_data, type = "C-classification", kernel = "polynomial", 
+               degree = best_degree_poly, coef0 = 1, cost = best_cost_poly, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_poly, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal degree and cost (Polynomial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_poly, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal degree and cost (Polynomial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+fitted_linear_test <- attributes(predict(bestmod_linear, test_data, decision.values = TRUE))$decision.values
+fitted_radial_test <- attributes(predict(bestmod_radial, test_data, decision.values = TRUE))$decision.values
+fitted_poly_test <- attributes(predict(bestmod_poly, test_data, decision.values = TRUE))$decision.values
+
+rocplot(-fitted_linear_test, test_data$DIABETICEV, main = "Test ROC Curves")
+rocplot(-fitted_radial_test, test_data$DIABETICEV, add = TRUE, col = "red")
+rocplot(-fitted_poly_test, test_data$DIABETICEV, add = TRUE, col = "blue")
+legend("bottomright", legend = c("Linear", "Radial", "Polynomial"),
+       col = c("black", "red", "blue"), lwd = 2)
+```
+
+#### Food DIABETES - Class Weight 1=1, 2=15
+```{r}
+set.seed(1)
+
+df_dia_food <- df_food %>%
+  select(DIABETICEV, FRUTNO, VEGENO, JUICEMNO, SALADSNO, BEANNO, SALSAMNO, 
+         TOMSAUCEMNO, SODAPNO, FRIESPNO, SPORDRMNO, FRTDRINKMNO, 
+         COFETEAMNO, POTATONO, PIZZANO) %>%
+  filter(DIABETICEV %in% c(1, 2)) %>%
+  droplevels()
+
+df_dia_food_scaled <- df_dia_food %>%
+  mutate(across(where(is.numeric) & !matches("DIABETICEV"), scale))
+
+n <- nrow(df_dia_food_scaled)
+train <- sample(1:n, size = 0.7 * n)
+train_data <- df_dia_food_scaled[train, ]
+test_data <- df_dia_food_scaled[-train, ]
+sub_train_data <- train_data[sample(1:nrow(train_data), 2000), ]
+
+class_weights <- c("1" = 1, "2" = 15)
+
+cat("\n--- Linear Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, kernel = "linear", 
+    ranges = list(cost = c(1, 10, 100)),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_linear <- tune.out$best.parameters$cost
+bestmod_linear <- svm(DIABETICEV ~ ., data = train_data, kernel = "linear", cost = best_cost_linear, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_linear, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal cost (Linear SVM): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_linear, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal cost (Linear SVM): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+cat("\n--- Radial Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, 
+    kernel = "radial", 
+    ranges = list(
+      cost = c(0.1, 1, 10, 100),
+      gamma = c(10, 100, 1000, 10000)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_radial <- tune.out$best.parameters$cost
+best_gamma_radial <- tune.out$best.parameters$gamma
+bestmod_radial <- svm(DIABETICEV ~ ., data = train_data, type = "C-classification", kernel = "radial", 
+               cost = best_cost_radial, gamma = best_gamma_radial, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_radial, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal cost and gamma (Radial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_radial, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal cost and gamma (Radial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+cat("\n--- Polynomial Kernel Results ---\n")
+
+tune.out <- tune(svm, DIABETICEV ~ ., data = sub_train_data, 
+    kernel = "polynomial", 
+    ranges = list(
+      cost = c(1, 10, 100),
+      degree = c(2, 3)
+    ),
+    class.weights = class_weights)
+summary(tune.out)
+best_cost_poly <- tune.out$best.parameters$cost
+best_degree_poly <- tune.out$best.parameters$degree
+bestmod_poly <- svm(DIABETICEV ~ ., data = train_data, type = "C-classification", kernel = "polynomial", 
+               degree = best_degree_poly, coef0 = 1, cost = best_cost_poly, class.weights = class_weights, decision.values = TRUE)
+
+ypred <- predict(bestmod_poly, train_data)
+train_error <- 1 - mean(ypred == train_data$DIABETICEV)
+cat("Training error with optimal degree and cost (Polynomial Kernel): ", train_error, "\n")
+print(table(predict = ypred, truth = train_data$DIABETICEV))
+
+ypred <- predict(bestmod_poly, test_data)
+test_error <- 1 - mean(ypred == test_data$DIABETICEV)
+cat("\nTest error with optimal degree and cost (Polynomial Kernel): ", test_error, "\n")
+print(table(predict = ypred, truth = test_data$DIABETICEV))
+
+fitted_linear_test <- attributes(predict(bestmod_linear, test_data, decision.values = TRUE))$decision.values
+fitted_radial_test <- attributes(predict(bestmod_radial, test_data, decision.values = TRUE))$decision.values
+fitted_poly_test <- attributes(predict(bestmod_poly, test_data, decision.values = TRUE))$decision.values
+
+rocplot(-fitted_linear_test, test_data$DIABETICEV, main = "Test ROC Curves")
+rocplot(-fitted_radial_test, test_data$DIABETICEV, add = TRUE, col = "red")
+rocplot(-fitted_poly_test, test_data$DIABETICEV, add = TRUE, col = "blue")
+legend("bottomright", legend = c("Linear", "Radial", "Polynomial"),
+       col = c("black", "red", "blue"), lwd = 2)
+```
+
